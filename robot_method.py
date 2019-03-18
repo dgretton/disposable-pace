@@ -143,138 +143,152 @@ if __name__ == '__main__':
                 shaker.start(300), pump_int.bleach_clean(), shaker.stop())) # started and stopped at least once
         initialize(ham_int)
         hepa_on(ham_int, simulate=int(simulation_on))
+        try:
+            # make sure we initially have something to dispense frothy waste into
+            wash_empty_refill(ham_int, refillAfterEmpty=3,  # 3=Refill chamber 2 only, which is BLEACH
+                                           chamber2WashLiquid=0)    # 0=Liquid 1 (red container) (bleach)
+            prime_and_clean.join()
 
-        # make sure we initially have something to dispense frothy waste into
-        wash_empty_refill(ham_int, refillAfterEmpty=3,  # 3=Refill chamber 2 only, which is BLEACH
-                                       chamber2WashLiquid=0)    # 0=Liquid 1 (red container) (bleach)
-        prime_and_clean.join()
+            def clean_reservoir(pump_int, shaker):
+                shaker.start(300)
+                pump_int.bleach_clean()
+                shaker.stop()
 
-        def clean_reservoir(pump_int, shaker):
-            shaker.start(300)
-            pump_int.bleach_clean()
+            # tuples of the form (tip box, offset, plate reader plate,  ___)
+            tip_rotation_list = [(l_middle_back,    0,      None),
+                                 (l_middle_back,    48,     rp_l_middle_back),
+                                 (l_middle,         0,      None),
+                                 (l_middle,         48,     None),
+                                 (l_middle_front,   0,      None),
+                                 (l_middle_front,   48,     rp_l_middle),
+                                 (l_front,          0,      None),
+                                 (l_front,          48,     None),
+                                 (r_back,           0,      None),
+                                 (r_back,           48,     rp_l_middle_front),
+                                 (r_middle_back,    0,      None),
+                                 (r_middle_back,    48,     None),
+                                 (r_middle,         0,      None),
+                                 (r_middle,         48,     rp_l_front),
+                                 (r_middle_front,   0,      None),
+                                 (r_middle_front,   48,     None),
+                                 ]
+            
+            rotation_variable = 0
+            while(True):
+                start_time = time.time()
+                (tip_rotation_box, tip_rotation_offset, reader_plate_site) = tip_rotation_list[rotation_variable]
+                
+                plate_read = True
+                if reader_plate_site is None:
+                    plate_read = False
+                
+                logging.info('\n##### Tip rotation this iteration: ' + str(rotation_variable) + ' ' + str(tip_rotation_box.layout_name()) + ' ' + str(tip_rotation_offset))
+                rotation_variable = (rotation_variable + 1) % len(tip_rotation_list)
+              
+                # summon bacterial culture
+                culture_fill_thread = run_async(lambda: pump_int.refill(culture_supply_vol))
+
+                # move the next batch of 48 tips to tip_staging using the 8-channel head
+                for i in range(6):
+                    tip_pick_up(ham_int, [(tip_rotation_box, x+i*8 + tip_rotation_offset) for x in range(8)])
+                    tip_eject  (ham_int, [(tip_staging     , x+i*2*8                    ) for x in range(8)])
+
+                # dispense inducer in an x-pattern into the reservoir
+                logging.info('\n##### Filling reservoir and adding inducer.')
+                while True:
+                    try:
+                        tip_pick_up(ham_int, [next(inducer_tip_pos_gen)])
+                        break
+                    except pyhamilton.NoTipError:
+                        continue
+                aspirate(ham_int, [(inducer_site, 0)], [inducer_vol])
+                dispense(ham_int, [(culture_reservoir, 0)], [inducer_vol/5])
+                dispense(ham_int, [(culture_reservoir, 6*8+4)], [inducer_vol/5])
+                dispense(ham_int, [(culture_reservoir, 88)], [inducer_vol/5])
+                dispense(ham_int, [(culture_reservoir, 7)], [inducer_vol/5])
+                dispense(ham_int, [(culture_reservoir, 95)], [inducer_vol/5])
+                tip_eject(ham_int)
+
+                ## With 96-head
+                # pick up 48-tips
+                culture_fill_thread.join()
+                tip_pick_up_96(ham_int, tip_staging)
+
+                # mix and aspirate culture 
+                aspirate_96(ham_int, culture_reservoir, cycle_replace_vol, mixCycles=12, mixVolume=100, liquidHeight=.5, airTransportRetractDist=15)            
+                
+                # dispense into lagoons
+                dispense_96(ham_int, lagoon_plate, cycle_replace_vol, liquidHeight=lagoon_fly_disp_height, dispenseMode=9)
+                
+                ## Mix. Aspirate waste
+                #aspirate_96(ham_int, lagoon_plate, cycle_replace_vol, mixCycles=2, mixPosition=2,
+                #        mixVolume=cycle_replace_vol, liquidFollowing=1, liquidHeight=fixed_lagoon_height, airTransportRetractDist=30)
+                #dispense_96(ham_int, reader_plate_site, read_sample_vol, liquidHeight=5, dispenseMode=9, airTransportRetractDist=30) # mode: blowout
+                #
+                #subsequent_dispense = cycle_replace_vol 
+                ## dispense waste into plate reader plate
+                #if (plate_read):
+                #    
+                #    dispense_96(ham_int, reader_plate_site, read_sample_vol)
+                #    subsequent_dispense = cycle_replace_vol - read_sample_vol   # reduce how much waste you eject to trash
+                #
+                ## dispense into bleach bath
+                #dispense_96(ham_int, bleach_site, subsequent_dispense)
+                
+                # Mix. Aspirate waste. dispense waste into plate reader plate
+                aspirate_96(ham_int, lagoon_plate, read_sample_vol, mixCycles=2, mixPosition=2,
+                        mixVolume=cycle_replace_vol, liquidFollowing=1, liquidHeight=fixed_lagoon_height)
+                if (plate_read):
+                    ## TODO make a similar rotation loop over plate reader plates
+                    dispense_96(ham_int, reader_plate_site, read_sample_vol, liquidHeight=5, dispenseMode=9) # mode: blowout
+                else:
+                    dispense_96(ham_int, lagoon_plate, read_sample_vol, liquidHeight=fixed_lagoon_height+3, dispenseMode=9) # mode: blowout
+
+                # draining lagoons to constant height
+                excess_vol = cycle_replace_vol*1.2
+                aspirate_96(ham_int, lagoon_plate, excess_vol, liquidHeight=fixed_lagoon_height)
+                dispense_96(ham_int, bleach_site, excess_vol, liquidHeight=10, dispenseMode=9) # mode: blowout
+                
+                # start cleaning waffle /after/ waste dispense is done
+                waffle_clean_thread = run_async(lambda: (pump_int.empty(culture_supply_vol), clean_reservoir(pump_int, shaker)))
+                
+                # trash tips
+                tip_eject_96(ham_int, tipEjectToKnownPosition=2)    #2 is default waste
+                                           
+                # read plate
+                if (plate_read):                
+                    protocols = ['17_8_12_lum', '17_8_12_abs']
+                    data_types = ['lum', 'abs']
+                    platedatas = read_plate(ham_int, reader_int, reader_tray, reader_plate_site, protocols, plate_id='plate'+str(rotation_variable))
+                    if simulation_on:
+                        platedatas = [PlateData(os.path.join('assets', 'dummy_platedata.csv'))] * len(protocols) # sim dummies
+                    for platedata, data_type in zip(platedatas, data_types):
+                        platedata.wait_for_file()
+                        db_add_plate_data(platedata, data_type, reader_plate_site, lagoons, [x+y*2*8 for y in range(6) for x in range(8)]) # DANGER lagoons spaced out!
+                
+                    # refill bleach waste every other iteration
+                    wash_empty_refill(ham_int, refillAfterEmpty=3,  # 3=Refill chamber 2 only, which is BLEACH
+                                           chamber2WashLiquid=0)    # 0=Liquid 1 (red container) (bleach)
+                                           
+                # join all threads
+                waffle_clean_thread.join()
+                
+                # wait remainder of cycle time
+                if not simulation_on:
+                    time.sleep(max(0, generation_time - time.time() + start_time))
+        except Exception as e:
+            errmsg_str = e.__class__.__name__ + ': ' + str(e).replace('\n', ' ')
+            logging.exception(errmsg_str)
+            print(errmsg_str)
+        finally:
+            clear_fileflag('debug')
             shaker.stop()
-
-        # tuples of the form (tip box, offset, plate reader plate,  ___)
-        tip_rotation_list = [(l_middle_back,    0,      None),
-                             (l_middle_back,    48,     rp_l_middle_back),
-                             (l_middle,         0,      None),
-                             (l_middle,         48,     None),
-                             (l_middle_front,   0,      None),
-                             (l_middle_front,   48,     rp_l_middle),
-                             (l_front,          0,      None),
-                             (l_front,          48,     None),
-                             (r_back,           0,      None),
-                             (r_back,           48,     rp_l_middle_front),
-                             (r_middle_back,    0,      None),
-                             (r_middle_back,    48,     None),
-                             (r_middle,         0,      None),
-                             (r_middle,         48,     rp_l_front),
-                             (r_middle_front,   0,      None),
-                             (r_middle_front,   48,     None),
-                             ]
-        
-        rotation_variable = 0
-        while(True):
-            start_time = time.time()
-            (tip_rotation_box, tip_rotation_offset, reader_plate_site) = tip_rotation_list[rotation_variable]
-            
-            plate_read = True
-            if reader_plate_site is None:
-                plate_read = False
-            
-            logging.info('\n##### Tip rotation this iteration: ' + str(rotation_variable) + ' ' + str(tip_rotation_box.layout_name()) + ' ' + str(tip_rotation_offset))
-            rotation_variable = (rotation_variable + 1) % len(tip_rotation_list)
-          
-            # summon bacterial culture
-            culture_fill_thread = run_async(lambda: pump_int.refill(culture_supply_vol))
-
-            # move the next batch of 48 tips to tip_staging using the 8-channel head
-            for i in range(6):
-                tip_pick_up(ham_int, [(tip_rotation_box, x+i*8 + tip_rotation_offset) for x in range(8)])
-                tip_eject  (ham_int, [(tip_staging     , x+i*2*8                    ) for x in range(8)])
-
-            # dispense inducer in an x-pattern into the reservoir
-            logging.info('\n##### Filling reservoir and adding inducer.')
-            while True:
-                try:
-                    tip_pick_up(ham_int, [next(inducer_tip_pos_gen)])
-                    break
-                except pyhamilton.NoTipError:
-                    continue
-            aspirate(ham_int, [(inducer_site, 0)], [inducer_vol])
-            dispense(ham_int, [(culture_reservoir, 0)], [inducer_vol/5])
-            dispense(ham_int, [(culture_reservoir, 6*8+4)], [inducer_vol/5])
-            dispense(ham_int, [(culture_reservoir, 88)], [inducer_vol/5])
-            dispense(ham_int, [(culture_reservoir, 7)], [inducer_vol/5])
-            dispense(ham_int, [(culture_reservoir, 95)], [inducer_vol/5])
-            tip_eject(ham_int)
-
-            ## With 96-head
-            # pick up 48-tips
-            culture_fill_thread.join()
-            tip_pick_up_96(ham_int, tip_staging)
-
-            # mix and aspirate culture 
-            aspirate_96(ham_int, culture_reservoir, cycle_replace_vol, mixCycles=12, mixVolume=100, liquidHeight=.5, airTransportRetractDist=15)            
-            
-            # dispense into lagoons
-            dispense_96(ham_int, lagoon_plate, cycle_replace_vol, liquidHeight=lagoon_fly_disp_height, dispenseMode=9)
-            
-            ## Mix. Aspirate waste
-            #aspirate_96(ham_int, lagoon_plate, cycle_replace_vol, mixCycles=2, mixPosition=2,
-            #        mixVolume=cycle_replace_vol, liquidFollowing=1, liquidHeight=fixed_lagoon_height, airTransportRetractDist=30)
-            #dispense_96(ham_int, reader_plate_site, read_sample_vol, liquidHeight=5, dispenseMode=9, airTransportRetractDist=30) # mode: blowout
-            #
-            #subsequent_dispense = cycle_replace_vol 
-            ## dispense waste into plate reader plate
-            #if (plate_read):
-            #    
-            #    dispense_96(ham_int, reader_plate_site, read_sample_vol)
-            #    subsequent_dispense = cycle_replace_vol - read_sample_vol   # reduce how much waste you eject to trash
-            #
-            ## dispense into bleach bath
-            #dispense_96(ham_int, bleach_site, subsequent_dispense)
-            
-            # Mix. Aspirate waste. dispense waste into plate reader plate
-            aspirate_96(ham_int, lagoon_plate, read_sample_vol, mixCycles=2, mixPosition=2,
-                    mixVolume=cycle_replace_vol, liquidFollowing=1, liquidHeight=fixed_lagoon_height)
-            if (plate_read):
-                ## TODO make a similar rotation loop over plate reader plates
-                dispense_96(ham_int, reader_plate_site, read_sample_vol, liquidHeight=5, dispenseMode=9) # mode: blowout
-            else:
-                dispense_96(ham_int, lagoon_plate, read_sample_vol, liquidHeight=fixed_lagoon_height+3, dispenseMode=9) # mode: blowout
-
-            # draining lagoons to constant height
-            excess_vol = cycle_replace_vol*1.2
-            aspirate_96(ham_int, lagoon_plate, excess_vol, liquidHeight=fixed_lagoon_height)
-            dispense_96(ham_int, bleach_site, excess_vol, liquidHeight=10, dispenseMode=9) # mode: blowout
-            
-            # start cleaning waffle /after/ waste dispense is done
-            waffle_clean_thread = run_async(lambda: (pump_int.empty(culture_supply_vol), clean_reservoir(pump_int, shaker)))
-            
-            # trash tips
-            tip_eject_96(ham_int, tipEjectToKnownPosition=2)    #2 is default waste
-                                       
-            # read plate
-            if (plate_read):                
-                protocols = ['17_8_12_lum', '17_8_12_abs']
-                data_types = ['lum', 'abs']
-                platedatas = read_plate(ham_int, reader_int, reader_tray, reader_plate_site, protocols, plate_id='plate'+str(rotation_variable))
-                if simulation_on:
-                    platedatas = [PlateData(os.path.join('assets', 'dummy_platedata.csv'))] * len(protocols) # sim dummies
-                for platedata, data_type in zip(platedatas, data_types):
-                    platedata.wait_for_file()
-                    db_add_plate_data(platedata, data_type, reader_plate_site, lagoons, [x+y*2*8 for y in range(6) for x in range(8)]) # DANGER lagoons spaced out!
-            
-                # refill bleach waste every other iteration
-                wash_empty_refill(ham_int, refillAfterEmpty=3,  # 3=Refill chamber 2 only, which is BLEACH
-                                       chamber2WashLiquid=0)    # 0=Liquid 1 (red container) (bleach)
-                                       
-            # join all threads
-            waffle_clean_thread.join()
-            
-            # wait remainder of cycle time
-            if not simulation_on:
-                time.sleep(max(0, generation_time - time.time() + start_time))
-        
+            if not simulation_on and time.time() - start_time > 3600*2:
+                summon_devteam('I\'m concerned that your robot might\'ve stopped. ' + __file__ + ' halted.',
+                "Dear DevTeam,\n\nThe method above has stopped executing. This could be a good thing "
+                "or a bad thing. Either PACE is done, we're out of reader plates or tips or something, "
+                "or SOMEONE MESSED UP.\n\n" +
+                ('The following exception message might help you: ' + errmsg_str + '\n\n' if errmsg_str else '') +
+                "...If the devteam weren't infallible, I'd have more concerns.\n\nYours in science,\n\n"
+                "Hamilton \"Hammeth\" Starlet")
             
