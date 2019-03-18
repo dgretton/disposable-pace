@@ -281,14 +281,11 @@ if __name__ == '__main__':
             logging.exception(errmsg_str)
             print(errmsg_str)
         finally:
-            clear_fileflag('debug')
             shaker.stop()
             if not simulation_on and time.time() - start_time > 3600*2:
-                summon_devteam('I\'m concerned that your robot might\'ve stopped. ' + __file__ + ' halted.',
-                "Dear DevTeam,\n\nThe method above has stopped executing. This could be a good thing "
-                "or a bad thing. Either PACE is done, we're out of reader plates or tips or something, "
-                "or SOMEONE MESSED UP.\n\n" +
-                ('The following exception message might help you: ' + errmsg_str + '\n\n' if errmsg_str else '') +
-                "...If the devteam weren't infallible, I'd have more concerns.\n\nYours in science,\n\n"
-                "Hamilton \"Hammeth\" Starlet")
+                summon_devteam('Robot thROWING ERROR! ' + __file__ + ' halted... D:',
+                "Erika was pipetting and so could not provide a suitable body section for this email at time of writing.\n\n" +
+                ('The following exception message might help you anyway: \n\n' + errmsg_str + '\n\n' if errmsg_str else ' ') +
+                "Hopefully the resolution of this error will be as methodical, precise, and engrossing as Erika's pipetting.\n\nYours,\n\n"
+                "Hamilton \"Ham Sandwich\" Starlet")
             
