@@ -14,6 +14,8 @@ reader_mod_path = os.path.join(methods_dir, 'perma_plate_reader', 'platereader')
 pump_pkg_path = os.path.join(methods_dir, 'perma_pump', 'auxpump')
 shaker_pkg_path = os.path.join(methods_dir, 'perma_shaker', 'auxshaker')
 
+LAYFILE = os.path.join(this_file_dir, 'assets', 'deck.lay')
+
 for imp_path in (pyham_pkg_path, reader_mod_path, pump_pkg_path, shaker_pkg_path):
     pkgname = os.path.basename(imp_path)
     try:
@@ -225,7 +227,6 @@ def tip_eject_96(ham_int, tip96=None, **more_options):
     ham_int.wait_on_response(ham_int.send_command(EJECT96,
         labwarePositions=labware_poss,
         **more_options), raise_first_exception=True)
-        
 
 def aspirate_96(ham_int, plate96, vol, **more_options):
     logging.info('aspirate_96: Aspirate volume ' + str(vol) + ' from ' + plate96.layout_name() +
