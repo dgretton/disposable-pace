@@ -273,7 +273,7 @@ def add_stderr_logging(logger_name=None):
     sys.stderr = StderrLogger(logger.error)
 
 fileflag_dir = os.path.abspath('.')
-while fileflag_dir and os.path.basename(fileflag_dir).lower() != 'std-96-pace':
+while fileflag_dir and os.path.basename(fileflag_dir).lower() != 'disposable-pace':
     fileflag_dir = os.path.dirname(fileflag_dir)
 fileflag_dir = os.path.join(fileflag_dir, 'method_local', 'flags')
 
