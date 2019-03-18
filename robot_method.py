@@ -67,8 +67,8 @@ if __name__ == '__main__':
     num_lagoons = 48
     lagoons = range(num_lagoons)
     num_reader_plates = 5 * 4 # 5 stacks of 4
-    culture_supply_vol = 50 # mL
-    # inducer_vol = 200 # uL
+    culture_supply_vol = 25 # mL
+    inducer_vol = 200 # uL
     max_transfer_vol = 985 # uL
     rinse_mix_cycles = 4
     rinse_replacements = 5
@@ -88,8 +88,10 @@ if __name__ == '__main__':
     plate_trash = lmgr.assign_unused_resource(ResourceType(Plate96, 'plate_trash'))
     culture_reservoir = lmgr.assign_unused_resource(ResourceType(Plate96, 'waffle'))
     reader_tray = lmgr.assign_unused_resource(ResourceType(Plate96, 'reader_tray'))
+    inducer_site = lmgr.assign_unused_resource(ResourceType(Plate96, 'inducer'))
     bleach_site = lmgr.assign_unused_resource(ResourceType(Tip96, 'RT300_HW_96WashDualChamber1_bleach'))
     rinse_site = lmgr.assign_unused_resource(ResourceType(Tip96, 'RT300_HW_96WashDualChamber1_water'))
+    inducer_tips = lmgr.assign_unused_resource(ResourceType(Tip96, 'inducer_tips'))
     
     # tip areas
     tip_staging = lmgr.assign_unused_resource(ResourceType(Tip96, 'tip_staging'))
@@ -103,18 +105,15 @@ if __name__ == '__main__':
     r_middle_back = lmgr.assign_unused_resource(ResourceType(Tip96, 'r_middle_back'))
     r_middle = lmgr.assign_unused_resource(ResourceType(Tip96, 'r_middle'))
     r_middle_front = lmgr.assign_unused_resource(ResourceType(Tip96, 'r_middle_front'))
-    r_front = lmgr.assign_unused_resource(ResourceType(Tip96, 'r_front'))
+    #r_front = lmgr.assign_unused_resource(ResourceType(Tip96, 'r_front'))
     
     # individual plate reader plates
     rp_l_middle_back = lmgr.assign_unused_resource(ResourceType(Plate96, 'rp_l_middle_back'))
     rp_l_middle = lmgr.assign_unused_resource(ResourceType(Plate96, 'rp_l_middle'))
     rp_l_middle_front = lmgr.assign_unused_resource(ResourceType(Plate96, 'rp_l_middle_front'))
     rp_l_front = lmgr.assign_unused_resource(ResourceType(Plate96, 'rp_l_front'))
-    rp_r_back = lmgr.assign_unused_resource(ResourceType(Plate96, 'rp_r_back'))
-    rp_r_middle_back = lmgr.assign_unused_resource(ResourceType(Plate96, 'rp_r_middle_back'))
-    rp_r_middle = lmgr.assign_unused_resource(ResourceType(Plate96, 'rp_r_middle'))
-    rp_r_middle_front = lmgr.assign_unused_resource(ResourceType(Plate96, 'rp_r_middle_front'))
-    rp_r_front = lmgr.assign_unused_resource(ResourceType(Plate96, 'rp_r_front'))
+    
+    inducer_tip_pos_gen = iter(zip([inducer_tips] * 96, range(96)))
     
     # define system state
     sys_state = types.SimpleNamespace()
@@ -125,12 +124,12 @@ if __name__ == '__main__':
     sys_state.disable_pumps = '--no_pumps' in sys.argv
     debug = '--debug' in sys.argv
     simulation_on = debug or '--simulate' in sys.argv
-    
+
     def clean_reservoir(pump_int, shaker):
         shaker.start(300)
         pump_int.bleach_clean()
         shaker.stop()
-            
+
     shaker = Shaker()
     with HamiltonInterface(simulate=simulation_on) as ham_int, LBPumps() as pump_int, ClarioStar() as reader_int:
         if sys_state.disable_pumps or simulation_on:
@@ -140,7 +139,7 @@ if __name__ == '__main__':
             shaker.disable()
         ham_int.set_log_dir(os.path.join(local_log_dir, 'hamilton.log'))
         logging.info('\n##### Priming pump lines and cleaning reservoir.')
-        prime_and_clean = run_async(lambda: (#pump_int.prime(),              # important that the shaker is
+        prime_and_clean = run_async(lambda: (#pump_int.prime(),             # important that the shaker is
                 shaker.start(300), pump_int.bleach_clean(), shaker.stop())) # started and stopped at least once
         initialize(ham_int)
         hepa_on(ham_int, simulate=int(simulation_on))
@@ -149,7 +148,7 @@ if __name__ == '__main__':
         wash_empty_refill(ham_int, refillAfterEmpty=3,  # 3=Refill chamber 2 only, which is BLEACH
                                        chamber2WashLiquid=0)    # 0=Liquid 1 (red container) (bleach)
         prime_and_clean.join()
-        
+
         def clean_reservoir(pump_int, shaker):
             shaker.start(300)
             pump_int.bleach_clean()
@@ -161,19 +160,17 @@ if __name__ == '__main__':
                              (l_middle,         0,      None),
                              (l_middle,         48,     None),
                              (l_middle_front,   0,      None),
-                             (l_middle_front,   48,     None),
-                             (l_front,          0,      rp_l_middle),
+                             (l_middle_front,   48,     rp_l_middle),
+                             (l_front,          0,      None),
                              (l_front,          48,     None),
                              (r_back,           0,      None),
-                             (r_back,           48,     None),
+                             (r_back,           48,     rp_l_middle_front),
                              (r_middle_back,    0,      None),
-                             (r_middle_back,    48,     rp_l_middle_front),
+                             (r_middle_back,    48,     None),
                              (r_middle,         0,      None),
-                             (r_middle,         48,     None),
+                             (r_middle,         48,     rp_l_front),
                              (r_middle_front,   0,      None),
                              (r_middle_front,   48,     None),
-                             (r_front,          0,      rp_l_front),
-                             (r_front,          48,     None),
                              ]
         
         rotation_variable = 0
@@ -194,17 +191,31 @@ if __name__ == '__main__':
             # move the next batch of 48 tips to tip_staging using the 8-channel head
             for i in range(6):
                 tip_pick_up(ham_int, [(tip_rotation_box, x+i*8 + tip_rotation_offset) for x in range(8)])
-                tip_eject  (ham_int, [(tip_staging     , x+i*2*8                      ) for x in range(8)])
+                tip_eject  (ham_int, [(tip_staging     , x+i*2*8                    ) for x in range(8)])
+
+            # dispense inducer in an x-pattern into the reservoir
+            logging.info('\n##### Filling reservoir and adding inducer.')
+            while True:
+                try:
+                    tip_pick_up(ham_int, [next(inducer_tip_pos_gen)])
+                    break
+                except pyhamilton.NoTipError:
+                    continue
+            aspirate(ham_int, [(inducer_site, 0)], [inducer_vol])
+            dispense(ham_int, [(culture_reservoir, 0)], [inducer_vol/5])
+            dispense(ham_int, [(culture_reservoir, 6*8+4)], [inducer_vol/5])
+            dispense(ham_int, [(culture_reservoir, 88)], [inducer_vol/5])
+            dispense(ham_int, [(culture_reservoir, 7)], [inducer_vol/5])
+            dispense(ham_int, [(culture_reservoir, 95)], [inducer_vol/5])
+            tip_eject(ham_int)
 
             ## With 96-head
-            
             # pick up 48-tips
-            tip_pick_up_96(ham_int, tip_staging)
-            
-            # aspirate culture            
-            logging.info('\n##### Filling reservoir and adding inducer.')
             culture_fill_thread.join()
-            aspirate_96(ham_int, culture_reservoir, cycle_replace_vol)
+            tip_pick_up_96(ham_int, tip_staging)
+
+            # mix and aspirate culture 
+            aspirate_96(ham_int, culture_reservoir, cycle_replace_vol, mixCycles=12, mixVolume=100, liquidHeight=.5, airTransportRetractDist=15)            
             
             # dispense into lagoons
             dispense_96(ham_int, lagoon_plate, cycle_replace_vol, liquidHeight=lagoon_fly_disp_height, dispenseMode=9)
@@ -263,5 +274,7 @@ if __name__ == '__main__':
             waffle_clean_thread.join()
             
             # wait remainder of cycle time
-            time.sleep(max(0, generation_time - time.time() + start_time))
+            if not simulation_on:
+                time.sleep(max(0, generation_time - time.time() + start_time))
+        
             
