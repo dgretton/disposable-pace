@@ -139,10 +139,15 @@ if __name__ == '__main__':
             shaker.disable()
         ham_int.set_log_dir(os.path.join(local_log_dir, 'hamilton.log'))
         logging.info('\n##### Priming pump lines and cleaning reservoir.')
+        
         prime_and_clean = run_async(lambda: (#pump_int.prime(),             # important that the shaker is
-                shaker.start(300), pump_int.bleach_clean(), shaker.stop())) # started and stopped at least once
+                shaker.start(300), pump_int.bleach_clean(),
+                shaker.stop())) # started and stopped at least once
+        
+        
         initialize(ham_int)
         hepa_on(ham_int, simulate=int(simulation_on))
+        method_start_time = time.time()
         try:
             # make sure we initially have something to dispense frothy waste into
             wash_empty_refill(ham_int, refillAfterEmpty=3,  # 3=Refill chamber 2 only, which is BLEACH
@@ -186,35 +191,40 @@ if __name__ == '__main__':
                 rotation_variable = (rotation_variable + 1) % len(tip_rotation_list)
               
                 # summon bacterial culture
-                culture_fill_thread = run_async(lambda: pump_int.refill(culture_supply_vol))
-
-                # move the next batch of 48 tips to tip_staging using the 8-channel head
-                for i in range(6):
-                    tip_pick_up(ham_int, [(tip_rotation_box, x+i*8 + tip_rotation_offset) for x in range(8)])
-                    tip_eject  (ham_int, [(tip_staging     , x+i*2*8                    ) for x in range(8)])
+                culture_fill_thread = run_async(lambda: (pump_int.refill(culture_supply_vol), shaker.start(250), time.sleep(30))) # start shaker asap to mix in inducer, mix for at least 30 seconds
 
                 # dispense inducer in an x-pattern into the reservoir
                 logging.info('\n##### Filling reservoir and adding inducer.')
+                
+                # use 8-channel to fetch a tip to put in the tip staging
+                # pick up tip with 8-channel
                 while True:
                     try:
                         tip_pick_up(ham_int, [next(inducer_tip_pos_gen)])
                         break
                     except pyhamilton.NoTipError:
                         continue
-                aspirate(ham_int, [(inducer_site, 0)], [inducer_vol])
-                dispense(ham_int, [(culture_reservoir, 0)], [inducer_vol/5])
-                dispense(ham_int, [(culture_reservoir, 6*8+4)], [inducer_vol/5])
-                dispense(ham_int, [(culture_reservoir, 88)], [inducer_vol/5])
-                dispense(ham_int, [(culture_reservoir, 7)], [inducer_vol/5])
-                dispense(ham_int, [(culture_reservoir, 95)], [inducer_vol/5])
-                tip_eject(ham_int)
+                # put in tip staging
+                tip_eject(ham_int, [(tip_staging, 95)])
+                
+                # pick up inducer tip with 96-head
+                tip_pick_up_96(ham_int, tip_staging)
+                aspirate_96(ham_int, inducer_site, inducer_vol)
+                dispense_96(ham_int, culture_reservoir, inducer_vol)
+                tip_eject_96(ham_int)
 
-                ## With 96-head
+                ## With 96-head, perform culture swap
+                # move the next batch of 48 tips to tip_staging using the 8-channel head
+                for i in range(6):
+                    tip_pick_up(ham_int, [(tip_rotation_box, x+i*8 + tip_rotation_offset) for x in range(8)])
+                    tip_eject  (ham_int, [(tip_staging     , x+i*2*8                    ) for x in range(8)])
+                 
                 # pick up 48-tips
                 culture_fill_thread.join()
+                shaker.stop()
                 tip_pick_up_96(ham_int, tip_staging)
 
-                # mix and aspirate culture 
+                # mix and aspirate culture
                 aspirate_96(ham_int, culture_reservoir, cycle_replace_vol, mixCycles=12, mixVolume=100, liquidHeight=.5, airTransportRetractDist=15)            
                 
                 # dispense into lagoons
@@ -239,7 +249,6 @@ if __name__ == '__main__':
                 aspirate_96(ham_int, lagoon_plate, read_sample_vol, mixCycles=2, mixPosition=2,
                         mixVolume=cycle_replace_vol, liquidFollowing=1, liquidHeight=fixed_lagoon_height)
                 if (plate_read):
-                    ## TODO make a similar rotation loop over plate reader plates
                     dispense_96(ham_int, reader_plate_site, read_sample_vol, liquidHeight=5, dispenseMode=9) # mode: blowout
                 else:
                     dispense_96(ham_int, lagoon_plate, read_sample_vol, liquidHeight=fixed_lagoon_height+3, dispenseMode=9) # mode: blowout
@@ -257,7 +266,7 @@ if __name__ == '__main__':
                                            
                 # read plate
                 if (plate_read):                
-                    protocols = ['17_8_12_lum', '17_8_12_abs']
+                    protocols = ['kinetic_supp_3_high', 'kinetic_supp_abs']
                     data_types = ['lum', 'abs']
                     platedatas = read_plate(ham_int, reader_int, reader_tray, reader_plate_site, protocols, plate_id='plate'+str(rotation_variable))
                     if simulation_on:
@@ -282,10 +291,9 @@ if __name__ == '__main__':
             print(errmsg_str)
         finally:
             shaker.stop()
-            if not simulation_on and time.time() - start_time > 3600*2:
+            if not simulation_on and time.time() - method_start_time > 3600*2:
                 summon_devteam('Robot thROWING ERROR! ' + __file__ + ' halted... D:',
-                "Erika was pipetting and so could not provide a suitable body section for this email at time of writing.\n\n" +
+                "Hamilton Starlet Error.\n\n" +
                 ('The following exception message might help you anyway: \n\n' + errmsg_str + '\n\n' if errmsg_str else ' ') +
-                "Hopefully the resolution of this error will be as methodical, precise, and engrossing as Erika's pipetting.\n\nYours,\n\n"
-                "Hamilton \"Ham Sandwich\" Starlet")
+                "\n\n")
             
