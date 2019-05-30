@@ -150,7 +150,8 @@ if __name__ == '__main__':
         method_start_time = time.time()
         try:
             # make sure we initially have something to dispense frothy waste into
-            wash_empty_refill(ham_int, refillAfterEmpty=3,  # 3=Refill chamber 2 only, which is BLEACH
+            if not sys_state.disable_pumps:
+                wash_empty_refill(ham_int, refillAfterEmpty=3,  # 3=Refill chamber 2 only, which is BLEACH
                                            chamber2WashLiquid=0)    # 0=Liquid 1 (red container) (bleach)
             prime_and_clean.join()
 
@@ -276,7 +277,8 @@ if __name__ == '__main__':
                         db_add_plate_data(platedata, data_type, reader_plate_site, lagoons, [x+y*2*8 for y in range(6) for x in range(8)]) # DANGER lagoons spaced out!
                 
                     # refill bleach waste every other iteration
-                    wash_empty_refill(ham_int, refillAfterEmpty=3,  # 3=Refill chamber 2 only, which is BLEACH
+                    if not sys_state.disable_pumps:
+                        wash_empty_refill(ham_int, refillAfterEmpty=3,  # 3=Refill chamber 2 only, which is BLEACH
                                            chamber2WashLiquid=0)    # 0=Liquid 1 (red container) (bleach)
                                            
                 # join all threads
