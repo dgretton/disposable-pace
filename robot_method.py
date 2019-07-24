@@ -66,13 +66,12 @@ if __name__ == '__main__':
 
     num_lagoons = 48
     lagoons = range(num_lagoons)
-    num_reader_plates = 5 * 4 # 5 stacks of 4
     culture_supply_vol = 25 # mL
     inducer_vol = 200 # uL
     max_transfer_vol = 985 # uL
     rinse_mix_cycles = 4
     rinse_replacements = 5
-    cycle_replace_vol = 250 # uL
+    cycle_replace_vol = 350 # uL
     read_sample_vol = 175 # uL
     assert read_sample_vol < cycle_replace_vol
     generation_time = 30 * 60 # seconds
@@ -112,9 +111,13 @@ if __name__ == '__main__':
     rp_l_middle = lmgr.assign_unused_resource(ResourceType(Plate96, 'rp_l_middle'))
     rp_l_middle_front = lmgr.assign_unused_resource(ResourceType(Plate96, 'rp_l_middle_front'))
     rp_l_front = lmgr.assign_unused_resource(ResourceType(Plate96, 'rp_l_front'))
-    
-    inducer_tip_pos_gen = iter(zip([inducer_tips] * 96, range(96)))
-    
+
+    def inducer_tip_pos_gen():
+        while True:
+            for pos_tup in zip([inducer_tips] * 96, range(96)):
+                yield pos_tup
+    inducer_tip_pos_gen = inducer_tip_pos_gen()
+
     # define system state
     sys_state = types.SimpleNamespace()
     sys_state.need_to_refill_washer = True
@@ -124,6 +127,10 @@ if __name__ == '__main__':
     sys_state.disable_pumps = '--no_pumps' in sys.argv
     debug = '--debug' in sys.argv
     simulation_on = debug or '--simulate' in sys.argv
+    mid_run = '--continue' in sys.argv
+    if mid_run:
+        print('CONTINUING A PREVIOUSLY INITIALIZED AND PAUSED RUN. WILL SKIP CLEANING. OK? 5 SECONDS TO CANCEL...')
+        time.sleep(5)
 
     def clean_reservoir(pump_int, shaker):
         shaker.start(300)
@@ -140,7 +147,10 @@ if __name__ == '__main__':
         ham_int.set_log_dir(os.path.join(local_log_dir, 'hamilton.log'))
         logging.info('\n##### Priming pump lines and cleaning reservoir.')
         
-        prime_and_clean = run_async(lambda: (#pump_int.prime(),             # important that the shaker is
+        if mid_run:
+            prime_and_clean = None
+        else:
+            prime_and_clean = run_async(lambda: (#pump_int.prime(),             # important that the shaker is
                 shaker.start(300), pump_int.bleach_clean(),
                 shaker.stop())) # started and stopped at least once
         
@@ -153,7 +163,8 @@ if __name__ == '__main__':
             if not sys_state.disable_pumps:
                 wash_empty_refill(ham_int, refillAfterEmpty=3,  # 3=Refill chamber 2 only, which is BLEACH
                                            chamber2WashLiquid=0)    # 0=Liquid 1 (red container) (bleach)
-            prime_and_clean.join()
+            if prime_and_clean:
+                prime_and_clean.join()
 
             def clean_reservoir(pump_int, shaker):
                 shaker.start(300)
@@ -192,7 +203,7 @@ if __name__ == '__main__':
                 rotation_variable = (rotation_variable + 1) % len(tip_rotation_list)
               
                 # summon bacterial culture
-                culture_fill_thread = run_async(lambda: (pump_int.refill(culture_supply_vol), shaker.start(250), time.sleep(30))) # start shaker asap to mix in inducer, mix for at least 30 seconds
+                culture_fill_thread = run_async(lambda: pump_int.refill(culture_supply_vol))
 
                 # dispense inducer in an x-pattern into the reservoir
                 logging.info('\n##### Filling reservoir and adding inducer.')
@@ -208,21 +219,25 @@ if __name__ == '__main__':
                 # put in tip staging
                 tip_eject(ham_int, [(tip_staging, 95)])
                 
-                # pick up inducer tip with 96-head
+                # pick up inducer tip with 96-head and wait for fill to finish
                 tip_pick_up_96(ham_int, tip_staging)
+                culture_fill_thread.join()
+                
+                # add inducer
                 aspirate_96(ham_int, inducer_site, inducer_vol)
                 dispense_96(ham_int, culture_reservoir, inducer_vol)
                 tip_eject_96(ham_int)
 
                 ## With 96-head, perform culture swap
                 # move the next batch of 48 tips to tip_staging using the 8-channel head
+                shaker.start(250) # start shaker to mix in inducer in meantime
                 for i in range(6):
                     tip_pick_up(ham_int, [(tip_rotation_box, x+i*8 + tip_rotation_offset) for x in range(8)])
                     tip_eject  (ham_int, [(tip_staging     , x+i*2*8                    ) for x in range(8)])
+                shaker.stop()
                  
                 # pick up 48-tips
-                culture_fill_thread.join()
-                shaker.stop()
+                
                 tip_pick_up_96(ham_int, tip_staging)
 
                 # mix and aspirate culture
