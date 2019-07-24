@@ -56,8 +56,8 @@ for type in ['lum', 'abs']:
             if type == 'abs':
                 plt.ylim(0.0, 1.0)
             else:
-                #plt.ylim(450, 4000.0)
-                plt.ylim(0, 500.0)
+                plt.ylim(450, 4000.0)
+                #plt.ylim(0, 500.0)
         
             # decrease number of plotted X axis labels
             # make there be fewer labels so that you can read them

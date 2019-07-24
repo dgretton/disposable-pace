@@ -24,6 +24,9 @@ def plot_well(well, type, plt, color = 'b', linewidth = 1, linestyle = '.-'):
     remove_datetimes = [datetime(2019, 2, 27, 14, 58), datetime(2019, 2, 27, 11, 57), datetime(2019, 2, 27, 10, 57), datetime(2019, 2, 26, 18, 11), datetime(2019, 2, 27, 7, 37)]
     vals = [(t, w, v) for (t, w, v) in vals if t not in remove_datetimes]
     
+    # downsample to just 23 hours
+    vals = vals[:13]
+    
     plt.plot([j for (j, _, _) in vals], [lum for (j, _, lum) in vals], color = color, linestyle = linestyle, linewidth=linewidth, marker = 'o', markersize = 12)
     
     # decrease number of plotted X axis labels
@@ -115,7 +118,7 @@ for measurement_type in ['lum', 'abs']:
     # plot the data one type at a time
     i = 0
     patches = []
-    for type, wells in manifest.iteritems():
+    for type, wells in list(manifest.items()):
         i = i + 1
         
         # plot one well at a time
@@ -133,9 +136,16 @@ for measurement_type in ['lum', 'abs']:
     plt.legend(handles=patches, bbox_to_anchor=(1,-.6), loc="lower right", 
                 bbox_transform=fig2.transFigure, ncol=3)
 
+    plt.xlabel("Hours")
+    plt.ylabel(measurement_type)
+    if measurement_type == 'lum':
+        plt.title("Luminescence monitoring")
+    else:
+        plt.title("Absorbance monitoring")
+        
     # adjust limit values to reflect the type of graph
     if measurement_type == 'abs':
-        plt.ylim(0.0, 1.0)
+        plt.ylim(0.2, 0.6)
     else:
         #plt.ylim(350.0, 4000.0)
         fig2.get_axes()[0].set_yscale('log')
